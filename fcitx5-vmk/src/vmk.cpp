@@ -95,7 +95,7 @@ int them=0;
 std::string buildSocketPath(const char *base_path_suffix) {
     const char *username_c = std::getenv("USER");
     std::string username = username_c ? std::string(username_c) : "default";
-    std::string path = "/dev/shm/vmksocket-" + username + "/" + std::string(base_path_suffix);
+    std::string path = "/run/vmksocket-" + username + "/" + std::string(base_path_suffix);
     return path;
 }
 

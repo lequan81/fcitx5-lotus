@@ -38,9 +38,10 @@ std::string get_current_username() {
     return pw ? pw->pw_name : "unknown";
 }
 
-// setup environment in /dev/shm/vmksocket-<username>
+// setup environment in /run/vmksocket-<username>
 void setup_environment(std::string target_user) {
-    fs::path base_path = "/dev/shm/vmksocket-" + target_user;
+    char *env_dir = getenv("DATA_DIR");
+    fs::path base_path = env_dir ? env_dir : ("/run/vmksocket-" + target_user);
 
     try {
         if (!fs::exists(base_path)) {
@@ -187,7 +188,7 @@ int main(int argc, char *argv[]) {
 
     setup_environment(target_user);
     std::string socket_path =
-        ("/dev/shm/vmksocket-" + target_user + "/kb_socket");
+        ("/run/vmksocket-" + target_user + "/kb_socket");
 
     // Setup Uinput
     uinput_fd_ = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
