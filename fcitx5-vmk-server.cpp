@@ -1,10 +1,7 @@
-#include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <libinput.h>
 #include <libudev.h>
@@ -20,17 +17,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <thread>
 #include <unistd.h>
+#include <vector>
 namespace fs = std::filesystem;
 
-// event id for mouse event
-#define EV_DEVICE_ADDED 1
-#define EV_POINTER_BUTTON 402
-
+// --- VARIABLES ---
 static int uinput_fd_ = -1;
 static std::string MOUSE_FLAG_PATH;
-std::atomic<bool> stop_mouse_thread(false);
 
 // get username
 std::string get_current_username() {
@@ -89,16 +82,13 @@ void send_uinput_event(int type, int code, int value) {
     write(uinput_fd_, &ev, sizeof(ev));
 }
 
-// FIXED BACKSPACE: hold left key, send MSC_SCAN
 void send_backspace_uinput(int count) {
-    if (uinput_fd_ < 0)
-        return;
-    if (count <= 0)
+    if (uinput_fd_ < 0 || count <= 0)
         return;
     if (count > 10)
         count = 10;
 
-    const int INTER_KEY_DELAY_US = 1200; // 1ms between backspace
+    const int INTER_KEY_DELAY_US = 1200;
 
     for (int i = 0; i < count; ++i) {
         send_uinput_event(EV_KEY, KEY_BACKSPACE, 1);
@@ -110,72 +100,20 @@ void send_backspace_uinput(int count) {
         sleep_us(INTER_KEY_DELAY_US);
     }
 }
-// mouse monitor
-static const struct libinput_interface interface = {
-    .open_restricted = [](const char *path, int flags, void *user_data) -> int {
-        return open(path, flags);
-    },
-    .close_restricted = [](int fd, void *user_data) { close(fd); }};
 
-void mousePressMonitorThread() {
-    struct udev *udev = udev_new();
-    struct libinput *li = libinput_udev_create_context(&interface, NULL, udev);
-    libinput_udev_assign_seat(li, "seat0");
-
-    // save last write time
-    auto last_write_time = std::chrono::steady_clock::now();
-
-    while (!stop_mouse_thread.load()) {
-        // clear pending events
-        libinput_dispatch(li);
-
-        struct libinput_event *event;
-        while ((event = libinput_get_event(li))) {
-            int type = (int)libinput_event_get_type(event);
-
-            if (type == EV_DEVICE_ADDED) {
-                struct libinput_device *dev = libinput_event_get_device(event);
-                if (libinput_device_config_tap_get_finger_count(dev) > 0) {
-                    libinput_device_config_tap_set_enabled(
-                        dev, LIBINPUT_CONFIG_TAP_ENABLED);
-                    libinput_device_config_tap_set_button_map(
-                        dev, LIBINPUT_CONFIG_TAP_MAP_LRM);
-                }
-            } else if (type == EV_POINTER_BUTTON) {
-                struct libinput_event_pointer *p =
-                    libinput_event_get_pointer_event(event);
-                if (libinput_event_pointer_get_button_state(p) ==
-                    1) { // Pressed
-
-                    auto now = std::chrono::steady_clock::now();
-                    // calculate elapsed time
-                    auto elapsed =
-                        std::chrono::duration_cast<std::chrono::milliseconds>(
-                            now - last_write_time)
-                            .count();
-
-                    // delay 1000ms to avoid system too slow
-                    if (elapsed >= 1000) {
-                        std::ofstream flag(MOUSE_FLAG_PATH, std::ios::trunc);
-                        if (flag.is_open()) {
-                            flag << "Y=1\n";
-                            flag.close();
-                            last_write_time = now; // update last write time
-                            chmod(MOUSE_FLAG_PATH.c_str(), 0666);
-                        }
-                    } else {
-                    }
-                }
-            }
-            libinput_event_destroy(event);
-        }
-        // sleep 5ms to reduce CPU usage
-        usleep(5000);
-    }
-    libinput_unref(li);
-    udev_unref(udev);
+// LIBINPUT HELPERS
+static int open_restricted(const char *path, int flags, void *user_data) {
+    int fd = open(path, flags);
+    return fd < 0 ? -errno : fd;
 }
-// main function
+static void close_restricted(int fd, void *user_data) { close(fd); }
+
+static const struct libinput_interface interface = {
+    .open_restricted = open_restricted,
+    .close_restricted = close_restricted,
+};
+
+// MAIN FUNCTION
 int main(int argc, char *argv[]) {
     std::string target_user;
     if (argc == 3 && std::string(argv[1]) == "-u") {
@@ -187,8 +125,7 @@ int main(int argc, char *argv[]) {
     pin_to_pcore();
 
     setup_environment(target_user);
-    std::string socket_path =
-        ("/run/vmksocket-" + target_user + "/kb_socket");
+    std::string socket_path = ("/run/vmksocket-" + target_user + "/kb_socket");
 
     // Setup Uinput
     uinput_fd_ = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
@@ -201,36 +138,109 @@ int main(int argc, char *argv[]) {
         ioctl(uinput_fd_, UI_DEV_CREATE);
     }
 
-    // Setup Socket
-    int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    int server_fd =
+        socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0); // Non-blocking socket
     struct sockaddr_un addr{.sun_family = AF_UNIX};
     strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
     unlink(socket_path.c_str());
-    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-        chmod(socket_path.c_str(), 0666); // allow read/write
-        listen(server_fd, 5);
-    }
 
-    // Run mouse monitor thread
-    std::thread(mousePressMonitorThread).detach();
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        std::cerr << "Failed to bind socket" << std::endl;
+        return 1;
+    }
+    chmod(socket_path.c_str(), 0666);
+    listen(server_fd, 5);
+
+    // 6. Setup Libinput (Mouse Monitor)
+    struct udev *udev = udev_new();
+    struct libinput *li = libinput_udev_create_context(&interface, NULL, udev);
+    libinput_udev_assign_seat(li, "seat0");
+    int li_fd = libinput_get_fd(li);
+
+    std::vector<struct pollfd> fds(2);
+    fds[0].fd = server_fd;
+    fds[0].events = POLLIN;
+    fds[1].fd = li_fd;
+    fds[1].events = POLLIN;
 
     while (true) {
-        int client_fd = accept(server_fd, nullptr, nullptr);
-        if (client_fd < 0)
-            continue;
-        char buf[256];
-        int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
-        if (n > 0) {
-            buf[n] = 0;
-            std::string cmd(buf);
-            if (cmd.find("BACKSPACE_") == 0) {
-                try {
-                    send_backspace_uinput(std::stoi(cmd.substr(10)));
-                } catch (...) {
+        int ret = poll(fds.data(), fds.size(), -1);
+
+        if (ret < 0) {
+            // if error, continue
+            if (errno == EINTR)
+                continue;
+            break; // real error
+        }
+
+        // handle socket (backspace)
+        if (fds[0].revents & POLLIN) {
+            int client_fd = accept(server_fd, nullptr, nullptr);
+            if (client_fd >= 0) {
+                char buf[64];
+                int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
+                if (n > 0) {
+                    buf[n] = 0;
+                    std::string cmd(buf);
+                    if (cmd.find("BACKSPACE_") == 0) {
+                        try {
+                            send_backspace_uinput(std::stoi(cmd.substr(10)));
+                        } catch (...) {
+                        }
+                    }
                 }
+                close(client_fd);
             }
         }
-        close(client_fd);
+
+        // handle mouse (libinput)
+        if (fds[1].revents & POLLIN) {
+            libinput_dispatch(li); // Update internal state
+            struct libinput_event *event;
+
+            while ((event = libinput_get_event(li))) {
+                enum libinput_event_type type = libinput_event_get_type(event);
+
+                if (type == LIBINPUT_EVENT_DEVICE_ADDED) {
+                    // add new device
+                    struct libinput_device *dev =
+                        libinput_event_get_device(event);
+                    if (libinput_device_config_tap_get_finger_count(dev) > 0) {
+                        libinput_device_config_tap_set_enabled(
+                            dev, LIBINPUT_CONFIG_TAP_ENABLED);
+                        libinput_device_config_tap_set_button_map(
+                            dev, LIBINPUT_CONFIG_TAP_MAP_LRM);
+                    }
+                } else if (type == LIBINPUT_EVENT_POINTER_BUTTON) {
+                    struct libinput_event_pointer *p =
+                        libinput_event_get_pointer_event(event);
+                    // only when pressed
+                    if (libinput_event_pointer_get_button_state(p) ==
+                        LIBINPUT_BUTTON_STATE_PRESSED) {
+
+                        // write flag to ramfs
+                        int flag_fd = open(MOUSE_FLAG_PATH.c_str(),
+                                           O_CREAT | O_WRONLY | O_TRUNC, 0666);
+                        if (flag_fd >= 0) {
+                            write(flag_fd, "Y=1\n", 4);
+                            close(flag_fd);
+                        }
+                    }
+                }
+                libinput_event_destroy(event);
+            }
+        }
     }
+
+    // Cleanup
+    libinput_unref(li);
+    udev_unref(udev);
+    if (uinput_fd_ >= 0) {
+        ioctl(uinput_fd_, UI_DEV_DESTROY);
+        close(uinput_fd_);
+    }
+    close(server_fd);
+    unlink(MOUSE_FLAG_PATH.c_str());
+
     return 0;
 }
