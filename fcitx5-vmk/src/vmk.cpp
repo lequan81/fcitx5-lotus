@@ -786,14 +786,20 @@ bool isChromiumX11(fcitx::InputContext *ic, fcitx::Instance *instance) {
 
     void reset() {
         is_deleting_.store(0);
+        oldPreBuffer_.clear();
+        expected_backspaces_ = 0;
+        current_backspace_count_ = 0;
+        pending_commit_string_.clear();
+        current_thread_id_.store(0);
+        deleteBufferFile();
+        
         if (E == 3) {
             ic_->inputPanel().reset();
             if (vmkEngine_) ResetEngine(vmkEngine_.handle());
             ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
             ic_->updatePreedit();
         }
-        if (E == 2) {
-            oldPreBuffer_.clear();
+        if (E == 2 || E == 1 || E == 4) {
             ic_->inputPanel().reset();
             if (vmkEngine_) ResetEngine(vmkEngine_.handle());
         }
@@ -811,6 +817,16 @@ bool isChromiumX11(fcitx::InputContext *ic, fcitx::Instance *instance) {
             ic_->updatePreedit();
         }
         if (E == 2) { if (vmkEngine_) ResetEngine(vmkEngine_.handle()); }
+    }
+
+    void clearAllBuffers() {
+        oldPreBuffer_.clear();
+        expected_backspaces_ = 0;
+        current_backspace_count_ = 0;
+        pending_commit_string_.clear();
+        current_thread_id_.store(0);
+        deleteBufferFile();
+        if (vmkEngine_) ResetEngine(vmkEngine_.handle());
     }
 
 private:
@@ -868,7 +884,7 @@ vmkEngine::vmkEngine(Instance *instance)
         imNames_ = std::move(imNames);
     }
     config_.inputMethod.annotation().setList(imNames_);
-    auto fd = StandardPath::global().open(StandardPath::Type::PkgData, "bamboo/vietnamese.cm.dict", O_RDONLY);
+    auto fd = StandardPath::global().open(StandardPath::Type::PkgData, "vmk/vietnamese.cm.dict", O_RDONLY);
     if (!fd.isValid()) throw std::runtime_error("Failed to load dictionary");
     dictionary_.reset(NewDictionary(fd.release()));
 
@@ -1056,13 +1072,19 @@ void vmkEngine::activate(const InputMethodEntry &entry, InputContextEvent &event
     modeAction_->setShortText(targetMode);
 
     auto state = ic->propertyFor(&factory_);
-    state->reset();
+    
+    state->clearAllBuffers();
+    is_deleting_.store(0);
+    Y.store(0);
+    ic->inputPanel().reset();
+    ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+    ic->updatePreedit();
     
     statusArea.addAction(StatusGroup::InputMethod, modeAction_.get());
     statusArea.addAction(StatusGroup::InputMethod, inputMethodAction_.get());
     statusArea.addAction(StatusGroup::InputMethod, charsetAction_.get());
     statusArea.addAction(StatusGroup::InputMethod, geminiAction_.get());
-statusArea.addAction(StatusGroup::InputMethod, chromeX11Action_.get()); 
+statusArea.addAction(StatusGroup::InputMethod, chromeX11Action_.get());
 }
 
 void vmkEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) {
@@ -1099,7 +1121,7 @@ void vmkEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) {
             selectionMade = true;
         } else if (keyEvent.key().check(FcitxKey_Escape)) {
             selectionMade = true;
-        } else if (keyEvent.key().check(FcitxKey_7)) {
+        } else if (keyEvent.key().check(FcitxKey_grave)) {
             isSelectingAppMode_ = false;
             ic->inputPanel().reset();
             ic->updateUserInterface(UserInterfaceComponent::InputPanel);
@@ -1147,14 +1169,23 @@ void vmkEngine::keyEvent(const InputMethodEntry &entry, KeyEvent &keyEvent) {
 }
 
 void vmkEngine::reset(const InputMethodEntry &entry, InputContextEvent &event) {
-    if (E == 3) { auto state = event.inputContext()->propertyFor(&factory_); state->reset(); }
+    auto state = event.inputContext()->propertyFor(&factory_);
+    state->reset();
 }
 
 void vmkEngine::deactivate(const InputMethodEntry &entry, InputContextEvent &event) {
+    auto state = event.inputContext()->propertyFor(&factory_);
     if (E == 3) {
-        auto state = event.inputContext()->propertyFor(&factory_);
         if (event.type() != EventType::InputContextFocusOut) state->commitBuffer();
         else state->reset();
+    } else {
+        // Xóa sạch buffer preedit và các biến liên quan khi chuyển app cho mọi mode khác
+        state->clearAllBuffers();
+        is_deleting_.store(0);
+        Y.store(0);
+        event.inputContext()->inputPanel().reset();
+        event.inputContext()->updateUserInterface(UserInterfaceComponent::InputPanel);
+        event.inputContext()->updatePreedit();
     }
 }
 
@@ -1283,7 +1314,7 @@ void vmkEngine::showAppModeMenu(InputContext *ic) {
     candidateList->append(std::make_unique<DisplayOnlyCandidateWord>(getLabel("vmk1hc", "4. VMK1HC")));
     candidateList->append(std::make_unique<DisplayOnlyCandidateWord>(getLabel("Off", "5. OFF - Tắt bộ gõ")));
     candidateList->append(std::make_unique<DisplayOnlyCandidateWord>(Text("6. Xóa thiết lập cho app")));
-    candidateList->append(std::make_unique<DisplayOnlyCandidateWord>(Text("7. Tắt menu và gõ `")));
+    candidateList->append(std::make_unique<DisplayOnlyCandidateWord>(Text("`. Tắt menu và gõ `")));
 
     ic->inputPanel().reset();
     ic->inputPanel().setCandidateList(std::move(candidateList));

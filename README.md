@@ -79,7 +79,7 @@ git clone https://github.com/nhktmdzhg/VMK.git
 cd VMK
 
 # Biên dịch
-make
+make build
 
 # Cài đặt (cần quyền root)
 sudo make install
