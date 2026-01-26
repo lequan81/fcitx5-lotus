@@ -308,33 +308,6 @@ public:
         send_command_to_server(command);
     }
 
-    bool handleSystemToggle(KeyEvent &event, KeySym currentSym) {
-        int modcha = 0;
-        if (currentSym == FcitxKey_F9) {
-            if (E != 1) {
-                E = 1; modcha = 1; reset();
-                setup_uinput();
-            } else {
-                cleanup_uinput();
-            }
-            event.filterAndAccept();
-            return true;
-        }
-        if (currentSym == FcitxKey_F8) { if (E != 2) { E = 2; reset(); modcha = 1; } }
-        if (currentSym == FcitxKey_F11) { if (E != 3) { E = 3; reset(); modcha = 1; } }
-        if (currentSym == FcitxKey_F12) { if (E != 0) { E = 0; reset(); modcha = 1; } }
-        
-        if (modcha == 1) {
-            oldPreBuffer_.clear();
-            ResetEngine(vmkEngine_.handle());
-            setOption();
-            ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
-            event.filterAndAccept();
-            return true;
-        }
-        return false;
-    }
-
     bool handleUInputKeyPress(fcitx::KeyEvent &event, fcitx::KeySym currentSym) {
         if (!is_deleting_.load()) return false;
         if (isBackspace(currentSym)) {
@@ -519,7 +492,6 @@ bool isChromiumX11(fcitx::InputContext *ic, fcitx::Instance *instance) {
         }
         if (keyEvent.rawKey().check(FcitxKey_Shift_L) || keyEvent.rawKey().check(FcitxKey_Shift_R)) return;
         const fcitx::KeySym currentSym = keyEvent.rawKey().sym();
-        if (handleSystemToggle(keyEvent, currentSym)) return;
 //if (engine_->config().chromex11.value()&&
        if( engine_->config().chromex11.value()&&isChromiumX11(ic_, engine_->instance())) {
             if (EngineProcessKeyEvent(vmkEngine_.handle(), keyEvent.rawKey().sym(), keyEvent.rawKey().states())) keyEvent.filterAndAccept();
