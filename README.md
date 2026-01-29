@@ -24,7 +24,11 @@ Server (phần mềm chạy ngầm để giả lập phím và theo dõi chuột
 
 - **Phản hồi Thời gian thực (Real-time I/O):**
   - **Cũ:** Ghi file log chuột vào ổ cứng (có delay 1s để tránh hỏng ổ).
-  - **Mới:** Ghi trực tiếp tín hiệu vào `/run` (RAM/tmpfs). Loại bỏ hoàn toàn độ trễ, tín hiệu reset bộ gõ được gửi đi ngay lập tức khi bạn chạm vào chuột/touchpad.
+  - **Mới:** Sử dụng socket để gửi tín hiệu chuột đến addon, không ghi gì vào file.
+
+- **Bảo mật socket:**
+  - **Cũ:** File socket có quyền 666, bất cứ ai cũng có thể gửi socket nếu biết tên file, với phần mềm foss có file tường minh, đây là lỗ hổng bảo mật nghiêm trọng.
+  - **Mới:** Sử dụng `getsockopt` để kiểm tra tên tiến trình gửi socket, và chỉ khi nào đúng tiến trình mới xử lý tiếp, bảo mật cao hơn.
 
 ### 2. VMK Addon (Frontend)
 
