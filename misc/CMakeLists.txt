@@ -10,4 +10,4 @@ install(FILES module-fcitx5-vmk.conf
 
 install(FILES user-vmk.conf
     DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/sysusers.d
-    RENANE vmk.conf)
+    RENAME vmk.conf)
