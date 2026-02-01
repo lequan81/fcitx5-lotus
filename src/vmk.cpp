@@ -374,10 +374,53 @@ namespace fcitx {
             ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
         }
 
+        void performReplacement(const std::string& deletedPart, const std::string& addedPart) {
+            current_backspace_count_ = 0;
+            pending_commit_string_   = addedPart;
+
+            if (isAutofillCertain(ic_->surroundingText()))
+                extraBackspace = 1;
+            else
+                extraBackspace = 0;
+
+            expected_backspaces_ = fcitx::utf8::length(deletedPart) + 1 + extraBackspace;
+
+            if (expected_backspaces_ > 0) {
+                is_deleting_.store(true);
+                send_backspace_uinput(expected_backspaces_);
+
+                int my_id = ++current_thread_id_;
+                std::thread([this, my_id]() {
+                    auto start = std::chrono::steady_clock::now();
+                    while (is_deleting_.load()) {
+                        if (current_thread_id_.load() != my_id)
+                            return;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        auto now = std::chrono::steady_clock::now();
+                        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > 200)
+                            break;
+                    }
+                    if (current_thread_id_.load() == my_id) {
+                        if (!pending_commit_string_.empty()) {
+                            ic_->commitString(pending_commit_string_);
+                            pending_commit_string_ = "";
+                        }
+                        is_deleting_.store(false);
+                    }
+                }).detach();
+
+                extraBackspace = 0;
+            } else {
+                if (!addedPart.empty()) {
+                    ic_->commitString(addedPart);
+                }
+            }
+        }
+
         // Helper function for vmk1/vmk1hc mode
         void handleUinputMode(KeyEvent& keyEvent, fcitx::KeySym currentSym, bool checkEmptyPreedit) {
             if (!is_deleting_.load()) {
-                if (isBackspace(currentSym) || currentSym == FcitxKey_space || currentSym == FcitxKey_Return) {
+                if (isBackspace(currentSym) || currentSym == FcitxKey_Return) {
                     if (isBackspace(currentSym)) {
                         history_ += "\\b\\";
                         replayBufferToEngine(history_);
@@ -403,7 +446,41 @@ namespace fcitx {
             if (!is_deleting_.load()) {
                 if (uinput_fd_ < 0)
                     setup_uinput();
-                if (!EngineProcessKeyEvent(vmkEngine_.handle(), currentSym, keyEvent.rawKey().states())) {
+
+                bool isNavigation = (currentSym >= FcitxKey_Home && currentSym <= FcitxKey_Begin) || (currentSym >= FcitxKey_Left && currentSym <= FcitxKey_Down) ||
+                    currentSym == FcitxKey_Tab || currentSym == FcitxKey_ISO_Left_Tab;
+
+                uint32_t shortcutMask =
+                    static_cast<uint32_t>(KeyState::Ctrl) | static_cast<uint32_t>(KeyState::Alt) | static_cast<uint32_t>(KeyState::Super) | static_cast<uint32_t>(KeyState::Hyper);
+
+                if (isNavigation || keyEvent.key().states() & shortcutMask) {
+                    keyEvent.forward();
+                    return;
+                }
+                bool processed = EngineProcessKeyEvent(vmkEngine_.handle(), currentSym, keyEvent.rawKey().states());
+
+                if (auto commitF = UniqueCPtr<char>(EnginePullCommit(vmkEngine_.handle())); commitF && commitF.get()[0]) {
+                    std::string commitStr = commitF.get();
+                    std::string commonPrefix, deletedPart, addedPart;
+                    compareAndSplitStrings(oldPreBuffer_, commitStr, commonPrefix, deletedPart, addedPart);
+
+                    if (!deletedPart.empty()) {
+                        performReplacement(deletedPart, addedPart);
+                    } else {
+                        if (!addedPart.empty()) {
+                            ic_->commitString(addedPart);
+                        }
+                    }
+
+                    history_.clear();
+                    ResetEngine(vmkEngine_.handle());
+                    oldPreBuffer_.clear();
+
+                    keyEvent.filterAndAccept();
+                    return;
+                }
+
+                if (!processed) {
                     if (checkEmptyPreedit) {
                         UniqueCPtr<char> preeditC(EnginePullPreedit(vmkEngine_.handle()));
                         std::string      preeditStr = (preeditC && preeditC.get()[0]) ? preeditC.get() : "";
@@ -439,9 +516,6 @@ namespace fcitx {
                             oldPreBuffer_ = preeditStr;
                         }
                     } else {
-                        current_backspace_count_ = 0;
-                        pending_commit_string_   = addedPart;
-                        oldPreBuffer_            = preeditStr;
                         if (uinput_client_fd_ < 0) {
                             std::string rawKey = keyEvent.key().toString();
                             if (!rawKey.empty()) {
@@ -449,45 +523,12 @@ namespace fcitx {
                             }
                             return;
                         }
-                        if (isAutofillCertain(ic_->surroundingText()))
-                            extraBackspace = 1;
 
                         if (is_deleting_.load()) {
                             is_deleting_.store(false);
                         }
-
-                        expected_backspaces_ = fcitx::utf8::length(deletedPart) + 1 + extraBackspace;
-                        if (expected_backspaces_ > 0)
-                            is_deleting_.store(true);
-                        send_backspace_uinput(expected_backspaces_);
-                        int my_id = ++current_thread_id_;
-
-                        std::thread([this, my_id]() {
-                            auto start = std::chrono::steady_clock::now();
-
-                            while (is_deleting_.load()) {
-                                if (current_thread_id_.load() != my_id) {
-                                    return;
-                                }
-
-                                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-
-                                auto now = std::chrono::steady_clock::now();
-                                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > 200) {
-                                    break;
-                                }
-                            }
-
-                            if (current_thread_id_.load() == my_id) {
-                                if (!pending_commit_string_.empty()) {
-                                    ic_->commitString(pending_commit_string_);
-                                    pending_commit_string_ = "";
-                                }
-                                is_deleting_.store(false);
-                            }
-                        }).detach();
-
-                        extraBackspace = 0;
+                        performReplacement(deletedPart, addedPart);
+                        oldPreBuffer_ = preeditStr;
                     }
                 }
                 return;
@@ -532,10 +573,16 @@ namespace fcitx {
                         return;
                     EngineProcessKeyEvent(vmkEngine_.handle(), keyEvent.rawKey().sym(), keyEvent.rawKey().states());
                     if (auto commitF = UniqueCPtr<char>(EnginePullCommit(vmkEngine_.handle())); commitF && commitF.get()[0]) {
+                        if (!oldPreBuffer_.empty()) {
+                            DeletePreviousNChars(ic, fcitx::utf8::length(oldPreBuffer_), engine_->instance());
+                        }
+                        ic->commitString(commitF.get());
+
                         ResetEngine(vmkEngine_.handle());
                         oldPreBuffer_.clear();
                         ic->inputPanel().reset();
                         ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+                        keyEvent.filterAndAccept();
                         return;
                     }
                     UniqueCPtr<char> preeditC(EnginePullPreedit(vmkEngine_.handle()));

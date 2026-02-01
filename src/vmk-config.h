@@ -79,7 +79,15 @@ namespace fcitx {
         std::vector<std::string> list_;
     };
 
-    struct InputMethodAnnotation : public StringListAnnotation {};
+    struct InputMethodAnnotation : public StringListAnnotation {
+        void dumpDescription(RawConfig& config) const {
+            StringListAnnotation::dumpDescription(config);
+            config.setValueByPath("LaunchSubConfig", "True");
+            for (size_t i = 0; i < list_.size(); ++i) {
+                config.setValueByPath("SubConfigPath/" + std::to_string(i), stringutils::concat("fcitx://config/addon/vmk/macro/", list_[i]));
+            }
+        }
+    };
     struct ModeListAnnotation : public StringListAnnotation {
         ModeListAnnotation() {
             list_ = {"vmk1", "vmk2", "vmk1hc", "vmkpre"};
@@ -124,9 +132,10 @@ namespace fcitx {
         OptionWithAnnotation<std::string, StringListAnnotation> outputCharset{this, "OutputCharset", _("Output Charset"), "Unicode", {}, {}, StringListAnnotation()};
         Option<bool> spellCheck{this, "SpellCheck", _("Enable spell check"), true}; Option<bool> macro{this, "Macro", _("Enable Macro"), true};
         Option<bool>                                                                             capitalizeMacro{this, "CapitalizeMacro", _("Capitalize Macro"), true};
-        Option<bool> autoNonVnRestore{this, "AutoNonVnRestore", _("Auto restore keys with invalid words"), true};
-        Option<bool> modernStyle{this, "ModernStyle", _("Use oà, _uý (instead of òa, úy)"), false};
-        Option<bool> freeMarking{this, "FreeMarking", _("Allow type with more freedom"), true};);
+        Option<bool>    autoNonVnRestore{this, "AutoNonVnRestore", _("Auto restore keys with invalid words"), true};
+        Option<bool>    modernStyle{this, "ModernStyle", _("Use oà, _uý (instead of òa, úy)"), false};
+        Option<bool>    freeMarking{this, "FreeMarking", _("Allow type with more freedom"), true};
+        SubConfigOption customKeymap{this, "CustomKeymap", _("Custom Keymap"), "fcitx://config/addon/vmk/custom_keymap"};);
 
 } // namespace fcitx
 
