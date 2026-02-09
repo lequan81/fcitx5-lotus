@@ -858,11 +858,7 @@ namespace fcitx {
                     goto process_normal;
                 }
 
-                ResetEngine(vmkEngine_.handle());
-
-                for (uint32_t c : fcitx::utf8::MakeUTF8CharRange(oldWord)) {
-                    EngineProcessKeyEvent(vmkEngine_.handle(), c, 0);
-                }
+                EngineRebuildFromText(vmkEngine_.handle(), oldWord.c_str());
 
                 bool processed = EngineProcessKeyEvent(vmkEngine_.handle(), keyEvent.rawKey().sym(), keyEvent.rawKey().states());
 
