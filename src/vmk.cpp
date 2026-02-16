@@ -1175,6 +1175,9 @@ namespace fcitx {
         }
 
         void clearAllBuffers() {
+            if (is_deleting_.load(std::memory_order_acquire)) {
+                return;
+            }
             oldPreBuffer_.clear();
             history_.clear();
             if (!is_deleting_.load(std::memory_order_acquire)) {
@@ -1816,7 +1819,9 @@ namespace fcitx {
             return;
         }
 
-        state->reset();
+        if (event.type() == EventType::InputContextFocusOut) {
+            state->reset();
+        }
     }
 
     void vmkEngine::deactivate(const InputMethodEntry& entry, InputContextEvent& event) {
