@@ -7,6 +7,7 @@
  *
  */
 #include "vmk.h"
+#include "vmk-config.h"
 
 #include <cstdint>
 #include <fcitx-config/iniparser.h>
@@ -2067,10 +2068,11 @@ namespace fcitx {
     }
 
     std::string vmkEngine::overrideIcon(const fcitx::InputMethodEntry& /*entry*/) {
-        if (realMode == VMKMode::Off) {
-            return "fcitx-vmk-off";
+        switch (realMode) {
+            case VMKMode::Off: return "fcitx-vmk-off";
+            case VMKMode::Emoji: return "fcitx-vmk-emoji";
+            default: return {};
         }
-        return {};
     }
 } // namespace fcitx
 
