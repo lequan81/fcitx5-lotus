@@ -331,12 +331,11 @@ Khi đang ở trong bất kỳ ứng dụng nào, nhấn phím **`** để mở 
 | **Preedit**           | **Q** | Hiển thị gạch chân khi gõ. <br> **Tối ưu:**  hầu hết ứng dụng.                                                                                |
 | **Emoji Picker**      | **W** | Tìm kiếm và nhập Emoji (nguồn EmojiOne, hỗ trợ fuzzy search). Xem danh sách [tại đây](__data/emoji/EMOJI_____GUIDE.md__).                                                                            |
 | **OFF**               | **E** | Tắt bộ gõ.                                                                                                                                                                                             |
-| **Default Typing**    | **R** | Chuyển về chế độ gõ mặc định cho ứng dụng hiện tại.                                                                                                                                                     |
+| **Default Typing**    | **R** | Chuyển về chế độ gõ mặc định được cấu hình tại tuỳ chọn *Typing mode* ở bước 1.                                                                                                                               |
 | **Type `**            | **`** | Nhập ký tự **`**.                                                                                                                                                                                      ||
 
 Bộ gõ sẽ tự động lưu chế độ gõ đã dùng gần nhất cho từng ứng dụng và khôi phục cấu hình đó khi bạn mở lại chúng.
 
->**Lưu ý:** khi chọn **Default Typing**, bộ gõ sẽ tự động áp dụng chế độ gõ đã cấu hình tại tuỳ chọn *Typing mode* ở bước 1 làm mặc định.
 ### 3. Đặt lại trạng thái đang gõ
 
 Nhấp chuột hoặc chạm touchpad trong khi gõ sẽ tự động đặt lại trạng thái đang gõ, ngăn chặn hiện tượng dính ký tự giữa các từ.

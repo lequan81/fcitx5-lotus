@@ -253,7 +253,7 @@ namespace fcitx {
                 .freeMarking         = *engine_->config().freeMarking,
             };
             EngineSetOption(lotusEngine_.handle(), &option);
-        }`
+        }
 
         bool connect_uinput_server() {
             if (uinput_client_fd_ >= 0)
@@ -2074,7 +2074,7 @@ namespace fcitx {
 
         candidateList->append(std::make_unique<AppModeCandidateWord>(Text(_("[R] Default Typing")), [this, cleanup](InputContext* ic) {
             if (appRules_.count(currentConfigureApp_)) {
-                appRules_.erase(currentConfigureApp_);TypingTyping
+                appRules_.erase(currentConfigureApp_);
                 saveAppRules();
             }
             cleanup(ic);
