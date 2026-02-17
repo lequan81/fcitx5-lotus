@@ -7,7 +7,7 @@
  *
  */
 #include "vmk.h"
-#include "vmk-config.h"
+#include "ack-apps.h"
 
 #include <cstdint>
 #include <fcitx-config/iniparser.h>
@@ -68,9 +68,8 @@ std::atomic<bool> needEngineReset{false};
 std::string       BASE_SOCKET_PATH;
 // Global flag to signal mouse click for closing app mode menu
 static std::atomic<bool> g_mouse_clicked{false};
-
 std::atomic<bool>        is_deleting_{false};
-static const int         MAX_BACKSPACE_COUNT = 15;
+static const int         MAX_BACKSPACE_COUNT = 8;
 std::string              SubstrChar(const std::string& s, size_t start, size_t len);
 int                      compareAndSplitStrings(const std::string& A, const std::string& B, std::string& commonPrefix, std::string& deletedPart, std::string& addedPart);
 std::once_flag           monitor_init_flag;
@@ -78,6 +77,7 @@ std::atomic<bool>        stop_flag_monitor{false};
 std::atomic<bool>        monitor_running{false};
 int                      uinput_client_fd_ = -1;
 int                      realtextLen       = 0;
+bool                     waitAck           = false;
 std::atomic<int>         mouse_socket_fd{-1};
 
 std::atomic<int64_t>     replacement_start_ms_{0};
@@ -304,6 +304,11 @@ namespace fcitx {
                 if (connect_uinput_server()) {
                     send(uinput_client_fd_, &count, sizeof(count), MSG_NOSIGNAL);
                 }
+            }
+
+            if (waitAck) {
+                char ack;
+                recv(uinput_client_fd_, &ack, sizeof(ack), MSG_NOSIGNAL);
             }
         }
 
@@ -1166,6 +1171,9 @@ namespace fcitx {
         }
 
         void clearAllBuffers() {
+            if (is_deleting_.load(std::memory_order_acquire)) {
+                return;
+            }
             oldPreBuffer_.clear();
             history_.clear();
             if (!is_deleting_.load(std::memory_order_acquire)) {
@@ -1459,6 +1467,18 @@ namespace fcitx {
         }));
         uiManager.registerAction("vmk-freemarking", freeMarkingAction_.get());
 
+        fixVmk1WithAckAction_ = std::make_unique<SimpleAction>();
+        fixVmk1WithAckAction_->setLongText(_("Fix uinput mode with ack"));
+        fixVmk1WithAckAction_->setIcon("network-transmit-receive");
+        fixVmk1WithAckAction_->setCheckable(true);
+        connections_.emplace_back(fixVmk1WithAckAction_->connect<SimpleAction::Activated>([this](InputContext* ic) {
+            config_.fixVmk1WithAck.setValue(!*config_.fixVmk1WithAck);
+            saveConfig();
+            refreshOption();
+            updateFixVmk1WithAckAction(ic);
+        }));
+        uiManager.registerAction("vmk-fixvmk1withack", fixVmk1WithAckAction_.get());
+
         reloadConfig();
         globalMode_ = modeStringToEnum(config_.mode.value());
         updateModeAction(nullptr);
@@ -1526,6 +1546,7 @@ namespace fcitx {
         updateAutoNonVnRestoreAction(nullptr);
         updateModernStyleAction(nullptr);
         updateFreeMarkingAction(nullptr);
+        updateFixVmk1WithAckAction(nullptr);
     }
 
     void vmkEngine::setSubConfig(const std::string& path, const RawConfig& config) {
@@ -1573,6 +1594,19 @@ namespace fcitx {
         updateInputMethodAction(event.inputContext());
         updateCharsetAction(event.inputContext());
 
+        if (*config_.fixVmk1WithAck) {
+            if (targetMode == VMKMode::VMK1 || targetMode == VMKMode::VMK1HC || targetMode == VMKMode::VMKSmooth) {
+                bool needWaitAck = false;
+                for (const auto& ackApp : ack_apps) {
+                    if (appName.find(ackApp) != std::string::npos) {
+                        needWaitAck = true;
+                        break;
+                    }
+                }
+                waitAck = needWaitAck;
+            }
+        }
+
         setMode(targetMode, event.inputContext());
 
         auto state = ic->propertyFor(&factory_);
@@ -1593,6 +1627,7 @@ namespace fcitx {
         statusArea.addAction(StatusGroup::InputMethod, autoNonVnRestoreAction_.get());
         statusArea.addAction(StatusGroup::InputMethod, modernStyleAction_.get());
         statusArea.addAction(StatusGroup::InputMethod, freeMarkingAction_.get());
+        statusArea.addAction(StatusGroup::InputMethod, fixVmk1WithAckAction_.get());
     }
 
     void vmkEngine::keyEvent(const InputMethodEntry& entry, KeyEvent& keyEvent) {
@@ -1782,7 +1817,9 @@ namespace fcitx {
             return;
         }
 
-        state->reset();
+        if (event.type() == EventType::InputContextFocusOut) {
+            state->reset();
+        }
     }
 
     void vmkEngine::deactivate(const InputMethodEntry& entry, InputContextEvent& event) {
@@ -1914,6 +1951,15 @@ namespace fcitx {
             freeMarkingAction_->update(ic);
         }
     }
+
+    void vmkEngine::updateFixVmk1WithAckAction(InputContext* ic) {
+        fixVmk1WithAckAction_->setChecked(*config_.fixVmk1WithAck);
+        fixVmk1WithAckAction_->setShortText(*config_.fixVmk1WithAck ? _("Fix Vmk1 With Ack: On") : _("Fix Vmk1 With Ack: Off"));
+        if (ic) {
+            fixVmk1WithAckAction_->update(ic);
+        }
+    }
+
     void vmkEngine::loadAppRules() {
         appRules_.clear();
         std::ifstream file(appRulesPath_);
