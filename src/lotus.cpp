@@ -1974,9 +1974,9 @@ namespace fcitx {
                 continue;
             auto delimiterPos = line.find('=');
             if (delimiterPos != std::string::npos) {
-                std::string app     = line.substr(0, delimiterPos);
-                std::string modeStr = line.substr(delimiterPos + 1);
-                appRules_[app]      = modeStringToEnum(modeStr);
+                std::string app  = line.substr(0, delimiterPos);
+                std::string mode = line.substr(delimiterPos + 1);
+                appRules_[app]   = static_cast<LotusMode>(std::stoi(mode));
             }
         }
         file.close();
@@ -1988,9 +1988,9 @@ namespace fcitx {
             return;
 
         file << "# Lotus Per-App Configuration\n";
+        file << "# 0 = Off, 1 = Smooth, 2 = Uinput, 3 = UinputHC, 4 = SurroundingText, 5 = Preedit, 6 = Emoji\n";
         for (const auto& pair : appRules_) {
-            std::string modeStr = modeEnumToString(pair.second);
-            file << pair.first << "=" << modeStr << "\n";
+            file << pair.first << "=" << static_cast<int>(pair.second) << "\n";
         }
         file.close();
     }
