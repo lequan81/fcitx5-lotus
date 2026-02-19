@@ -64,18 +64,10 @@ int open_restricted(const char* path, int flags, void* /*user_data*/) {
     return fd < 0 ? -errno : fd;
 }
 
-/**
- * @brief Closes input device.
- * @param fd File descriptor to close.
- * @param user_data Unused user data.
- */
 void close_restricted(int fd, void* /*user_data*/) {
     close(fd);
 }
 
-/**
- * @brief libinput interface callbacks.
- */
 const struct libinput_interface interface = {
     .open_restricted  = open_restricted,
     .close_restricted = close_restricted,
